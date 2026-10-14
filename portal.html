@@ -68,7 +68,7 @@
   <div id="cust" style="display:none">
     <div class="top">
       <h1>會員中心 — <span id="uname"></span> <span class="chip" id="uno"></span></h1>
-      <div class="row"><button class="sec" onclick="custChangePw()">修改密碼</button><button class="sec" onclick="custRefresh()">重新整理</button><button class="sec" onclick="logoutAll()">登出</button></div>
+      <div class="row"><button id="swToAdm" style="display:none" onclick="switchView('adm')">切換到管理後台</button><button class="sec" onclick="custChangePw()">修改密碼</button><button class="sec" onclick="custRefresh()">重新整理</button><button class="sec" onclick="logoutAll()">登出</button></div>
     </div>
     <div class="grid" style="margin-bottom:14px">
       <div class="stat"><div class="k">方案狀態</div><div class="v" id="sStatus">—</div></div>
@@ -95,7 +95,7 @@
   <div id="adm" style="display:none">
     <div class="top">
       <h1>管理後台</h1>
-      <div class="row"><span class="chip" id="meChip"></span><button class="sec sm" onclick="admChangePw()">修改密碼</button><button class="sec sm" onclick="logoutAll()">登出</button></div>
+      <div class="row"><span class="chip" id="meChip"></span><button class="sm" id="swToCust" style="display:none" onclick="switchView('cust')">切換到會員中心</button><button class="sec sm" onclick="admChangePw()">修改密碼</button><button class="sec sm" onclick="logoutAll()">登出</button></div>
     </div>
     <div class="tabs" style="margin-bottom:14px">
       <button id="tabU" class="on" onclick="showTab('U')">會員管理</button>
@@ -240,7 +240,15 @@ async function doLogin() {
     const kind = await crpc('sp_portal_identify', { p_id: id });
     if (kind === 'member') await custLogin(id, pw);
     else if (kind === 'admin') await adminLogin(id, pw);
-    else if (kind === 'both') { try { await custLogin(id, pw); } catch (e1) { await adminLogin(id, pw); } }
+    else if (kind === 'both') {
+      // 同一組帳密兩邊都試；兩邊都成功就顯示「切換」按鈕，預設先進管理後台
+      let okC = false, okA = false, err = null;
+      try { await custLogin(id, pw); okC = true; } catch (e1) { err = e1; }
+      try { await adminLogin(id, pw); okA = true; } catch (e2) { if (!okC) err = e2; }
+      if (!okC && !okA) throw err;
+      if (!okC) { CRED = null; saveCred(null); }
+      updateSwitch();
+    }
     else {
       $('liMsg').innerHTML = '找不到這個帳號，您尚未下載試用。<br><a class="btn btn-pri" href="index.html#download" style="display:inline-block;margin-top:10px;text-decoration:none">前往下載試用</a>';
       return;
@@ -248,7 +256,18 @@ async function doLogin() {
     $('liMsg').textContent = '';
   } catch (e) { $('liMsg').textContent = '登入失敗：' + friendly(e.message); }
 }
-function logoutAll() { CRED = null; saveAuth(null); location.reload(); }
+function logoutAll() { CRED = null; saveCred(null); saveAuth(null); location.reload(); }
+// 會員+管理員「兩邊都有」時的切換（會員憑證存 sessionStorage，關掉分頁就清掉）
+function saveCred(c) { try { c ? sessionStorage.setItem('sp_cust_cred', JSON.stringify(c)) : sessionStorage.removeItem('sp_cust_cred'); } catch (e) {} }
+function updateSwitch() {
+  const both = !!(CRED && AUTH && ME);
+  $('swToAdm').style.display = both ? '' : 'none';
+  $('swToCust').style.display = both ? '' : 'none';
+}
+function switchView(v) {
+  if (v === 'cust') { if (!CRED) return; show('cust'); custRefresh(); }
+  else { if (!ME) return; show('adm'); loadUsers(); }
+}
 
 // ================= 會員 =================
 async function crpc(fn, args) {
@@ -259,7 +278,7 @@ async function crpc(fn, args) {
 async function custLogin(u, p) {
   const cred = { p_username: u, p_password: p };
   const me = await crpc('sp_portal_me', cred);
-  CRED = cred; custShow(me); loadRecords();
+  CRED = cred; saveCred(cred); custShow(me); loadRecords();
 }
 function custShow(me) {
   show('cust');
@@ -549,7 +568,14 @@ async function addDownload() {
 // ================= boot =================
 $('liPw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 (async () => {
-  if (AUTH) { try { await adminBoot(); return; } catch (e) { saveAuth(null); } }
+  let savedCred = null; try { savedCred = JSON.parse(sessionStorage.getItem('sp_cust_cred') || 'null'); } catch (e) {}
+  let admOk = false;
+  if (AUTH) { try { await adminBoot(); admOk = true; } catch (e) { saveAuth(null); } }
+  if (savedCred) {
+    try { const me = await crpc('sp_portal_me', savedCred); CRED = savedCred; if (!admOk) { custShow(me); loadRecords(); } }
+    catch (e) { saveCred(null); }
+  }
+  if (admOk || CRED) { updateSwitch(); return; }
   show('login');
 })();
 </script>
