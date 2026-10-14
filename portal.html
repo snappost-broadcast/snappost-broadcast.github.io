@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SnapPost Broadcast 登入</title>
+<title>SnapPost Broadcast 喚客快手 登入</title>
 <link rel="icon" href="favicon.ico">
 <style>
   :root { --bg:#f5f6f8; --card:#fff; --line:#e3e6ea; --txt:#1c2733; --sub:#6b7a8c;
@@ -237,7 +237,14 @@ async function doLogin() {
   if (!id || !pw) { $('liMsg').textContent = '請輸入帳號與密碼'; return; }
   $('liMsg').textContent = '登入中...';
   try {
-    if (id.indexOf('@') >= 0) await adminLogin(id, pw); else await custLogin(id, pw);
+    const kind = await crpc('sp_portal_identify', { p_id: id });
+    if (kind === 'member') await custLogin(id, pw);
+    else if (kind === 'admin') await adminLogin(id, pw);
+    else if (kind === 'both') { try { await custLogin(id, pw); } catch (e1) { await adminLogin(id, pw); } }
+    else {
+      $('liMsg').innerHTML = '找不到這個帳號，您尚未下載試用。<br><a class="btn btn-pri" href="index.html#download" style="display:inline-block;margin-top:10px;text-decoration:none">前往下載試用</a>';
+      return;
+    }
     $('liMsg').textContent = '';
   } catch (e) { $('liMsg').textContent = '登入失敗：' + friendly(e.message); }
 }
