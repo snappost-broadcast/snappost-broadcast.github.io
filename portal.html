@@ -103,6 +103,7 @@
       <button id="tabS" onclick="showTab('S')" style="display:none">試用設定</button>
       <button id="tabV" onclick="showTab('V')" style="display:none">版本管理</button>
       <button id="tabM" onclick="showTab('M')" style="display:none">管理員</button>
+      <button id="tabE" onclick="showTab('E')">錯誤回報</button>
     </div>
 
     <div id="paneU" class="card">
@@ -179,6 +180,20 @@
       <p class="muted" style="margin-bottom:8px">權限開關即時生效。「會員管理」= 調到期日/發訊量/停權/推薦人；「試用設定」= 改新註冊的試用天數與發訊量；「版本管理」= 程式版本與下載頁。超級管理員永遠全開。</p>
       <div style="overflow-x:auto"><table><thead><tr><th>Email</th><th>名稱</th><th>角色</th><th>狀態</th><th>會員管理</th><th>試用設定</th><th>版本管理</th><th>建立日</th></tr></thead>
       <tbody id="mRows"></tbody></table></div>
+    </div>
+    <div id="paneE" class="card" style="display:none">
+      <div class="row" style="margin-bottom:12px">
+        <input id="eQ" placeholder="搜尋帳號、機器碼或訊息..." style="flex:1;min-width:160px" onkeydown="if(event.key==='Enter')loadErrors()">
+        <button onclick="loadErrors()">搜尋</button>
+        <button class="sec" onclick="loadErrors(true)">全部</button>
+        <button class="sec" id="eClear7" onclick="clearErrors(7)" style="display:none">清除 7 天前</button>
+        <button class="sec" id="eClearAll" onclick="clearErrors(0)" style="display:none">全部清除</button>
+      </div>
+      <p class="muted" style="margin-bottom:8px">程式掃描／發送失敗會自動上傳；客戶也可按「回報問題」手動送。伺服器每天自動清 30 天前的紀錄，每台裝置最多留 30 筆。</p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>時間</th><th>會員</th><th>版本</th><th>類型</th><th>階段</th><th>訊息</th><th>操作</th></tr></thead>
+        <tbody id="eRows"></tbody>
+      </table></div>
     </div>
   </div>
 </div>
@@ -358,8 +373,8 @@ async function adminBoot() {
 function canDo(k) { return !!ME && (ME.role === 'super' || !!ME.perms[k]); }
 
 function showTab(t) {
-  for (const k of ['U', 'A', 'S', 'V', 'M']) { $('pane' + k).style.display = k === t ? 'block' : 'none'; $('tab' + k).classList.toggle('on', k === t); }
-  if (t === 'A') loadAudit(); if (t === 'M') loadAdmins(); if (t === 'V') loadVersions(); if (t === 'S') loadSettings();
+  for (const k of ['U', 'A', 'S', 'V', 'M', 'E']) { $('pane' + k).style.display = k === t ? 'block' : 'none'; $('tab' + k).classList.toggle('on', k === t); }
+  if (t === 'A') loadAudit(); if (t === 'M') loadAdmins(); if (t === 'V') loadVersions(); if (t === 'S') loadSettings(); if (t === 'E') loadErrors();
 }
 
 // ---- modal ----
@@ -494,6 +509,39 @@ async function loadAudit() {
     '<td><span class="chip">' + esc(ACT[r.action] || r.action) + '</span></td><td>' + esc(r.target_username) + '</td>' +
     '<td>' + esc(r.old_value) + ' → <b>' + esc(r.new_value) + '</b></td><td class="hide-m">' + esc(r.note) + '</td></tr>'
   ).join('') || '<tr><td colspan="6" class="muted">沒有紀錄</td></tr>';
+}
+
+// ---- error reports ----
+const EKIND = { scan: '掃描', task: '發送', manual: '手動回報' };
+const ESTAGE = { login_failed: '登入失敗', exception: '程式例外', low_memory: '記憶體不足', error: '任務錯誤', user_note: '客戶描述' };
+async function loadErrors(all) {
+  if (all) $('eQ').value = '';
+  let rows; try { rows = await rpc('adm_list_error_reports', { p_limit: 300, p_q: $('eQ').value.trim() || null }); } catch (e) { toast(e.message, true); return; }
+  const sup = ME && ME.role === 'super'; $('eClear7').style.display = sup ? '' : 'none'; $('eClearAll').style.display = sup ? '' : 'none';
+  $('eRows').innerHTML = (rows || []).map(r =>
+    '<tr><td style="white-space:nowrap">' + esc(r.created_at) + '</td><td>' + esc(r.username || '—') + '<div class="muted" style="font-size:11px">' + esc((r.device_id || '').slice(0, 8)) + '</div></td>' +
+    '<td>' + esc(r.app_version) + '</td><td><span class="chip">' + esc(EKIND[r.kind] || r.kind) + '</span></td>' +
+    '<td><span class="chip' + (r.kind !== 'manual' ? ' bad' : '') + '">' + esc(ESTAGE[r.stage] || r.stage) + '</span></td>' +
+    '<td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(r.message) + '">' + esc(r.message || '') + '</td>' +
+    '<td style="white-space:nowrap"><button class="sec sm" onclick="viewError(' + r.id + ')">查看</button> <button class="sec sm" onclick="delError(' + r.id + ')">刪除</button></td></tr>'
+  ).join('') || '<tr><td colspan="7" class="muted">沒有錯誤回報</td></tr>';
+}
+async function viewError(id) {
+  let r; try { r = await rpc('adm_get_error_report', { p_id: id }); } catch (e) { toast(e.message, true); return; }
+  if (!r) { toast('找不到這筆紀錄', true); return; }
+  const head = ['時間：' + r.created_at, '會員：' + (r.username || '—'), '機器碼：' + r.device_id, '版本：' + r.app_version,
+    '類型：' + (EKIND[r.kind] || r.kind) + ' / ' + (ESTAGE[r.stage] || r.stage), 'FB 帳號：' + (r.account_id || '—'),
+    '粉專：' + (r.fanpage_url || '—'), '系統：' + (r.os_info || '—')].map(esc).join('<br>');
+  openModal('錯誤回報 #' + r.id, '<div class="muted" style="font-size:12px;line-height:1.7;margin-bottom:10px">' + head + '</div>' +
+    '<div style="font-weight:600;margin-bottom:4px">訊息</div><pre style="white-space:pre-wrap;background:#f3f5f7;padding:8px;border-radius:6px;font-size:12px;max-height:160px;overflow:auto">' + esc(r.message || '（無）') + '</pre>' +
+    '<div style="font-weight:600;margin:10px 0 4px">執行紀錄（尾端）</div><pre style="white-space:pre-wrap;background:#f3f5f7;padding:8px;border-radius:6px;font-size:11px;max-height:360px;overflow:auto">' + esc(r.log_tail || '（無）') + '</pre>', null, true);
+}
+async function delError(id) {
+  openModal('刪除錯誤回報', '<p>確定刪除 #' + id + '？</p>', async () => { await rpc('adm_delete_error_report', { p_id: id }); toast('已刪除'); loadErrors(); });
+}
+async function clearErrors(days) {
+  openModal(days ? '清除 ' + days + ' 天前的錯誤回報' : '清除全部錯誤回報', '<p>' + (days ? '會刪掉 ' + days + ' 天前的所有紀錄。' : '會刪掉全部紀錄，無法復原。') + '</p>',
+    async () => { const n = await rpc('adm_clear_error_reports', { p_days: days }); toast('已清除 ' + n + ' 筆'); loadErrors(); });
 }
 
 // ---- settings ----
