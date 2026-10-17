@@ -114,7 +114,7 @@
       </div>
       <p class="muted" style="margin-bottom:8px">點「發訊量」數字可看該會員的每日發送紀錄。</p>
       <div style="overflow-x:auto"><table>
-        <thead><tr><th>ID</th><th>帳號</th><th>到期日</th><th>發訊量</th><th>狀態</th>
+        <thead><tr><th>ID</th><th>帳號</th><th>到期日</th><th>發訊量</th><th>狀態</th><th>通道</th>
         <th class="hide-m">推薦碼</th><th class="hide-m">推薦人</th><th class="hide-m">版本</th><th class="hide-m">註冊日</th><th>操作</th></tr></thead>
         <tbody id="uRows"></tbody>
       </table></div>
@@ -144,7 +144,10 @@
     </div>
 
     <div id="paneV" class="card" style="display:none">
-      <h2>登記新版本（寫入後所有 Supabase 版客戶端會自動更新）</h2>
+      <h2>發佈通道</h2>
+      <p class="muted" style="margin-bottom:10px">stable = 一般會員、beta = 測試會員（在「會員管理」切換）。新版本先指定給 beta，beta 會員測過沒問題再指定給 stable。留空 = 最新登記的版本（beta 留空時跟 stable 一樣）。客戶端每 10 分鐘檢查一次，沒有任務在跑就自動更新。</p>
+      <div id="chRows" style="margin-bottom:18px" class="muted">載入中...</div>
+      <h2>登記新版本（登記後要在上面指定給通道，客戶端才會拿到）</h2>
       <div class="row" style="margin-bottom:8px">
         <input id="vVer" placeholder="版本號 例 1.5.45" style="width:140px">
         <input id="vUrl" placeholder="更新 zip 網址（GitHub Release）" style="flex:1;min-width:260px">
@@ -189,7 +192,7 @@
         <button class="sec" id="eClear7" onclick="clearErrors(7)" style="display:none">清除 7 天前</button>
         <button class="sec" id="eClearAll" onclick="clearErrors(0)" style="display:none">全部清除</button>
       </div>
-      <p class="muted" style="margin-bottom:8px">程式掃描／發送失敗會自動上傳；客戶也可按「回報問題」手動送。伺服器每天自動清 30 天前的紀錄，每台裝置最多留 30 筆。</p>
+      <p class="muted" style="margin-bottom:8px">程式掃描／發送失敗會自動上傳；程式沒正常關閉（當機、被結束）下次啟動會把上次的執行紀錄傳上來（類型「程式異常」）；客戶也可按「回報問題」手動送。伺服器每天自動清 30 天前的紀錄，每台裝置最多留 30 筆。</p>
       <div style="overflow-x:auto"><table>
         <thead><tr><th>時間</th><th>會員</th><th>版本</th><th>類型</th><th>階段</th><th>訊息</th><th>操作</th></tr></thead>
         <tbody id="eRows"></tbody>
@@ -402,6 +405,7 @@ async function loadUsers() {
       '<td><span class="chip' + (expired ? ' bad' : '') + '">' + esc(u.expire_date || '—') + '</span></td>' +
       '<td><button class="link" onclick="openDaily(' + i + ')" title="看每日紀錄">' + u.messages_sent + ' / ' + u.message_limit + '</button></td>' +
       '<td>' + (u.status === 'active' ? '<span class="chip">正常</span>' : '<span class="chip bad">停權</span>') + '</td>' +
+      '<td style="white-space:nowrap">' + chChip(u.channel) + (canDo('users') ? ' <button class="sm sec" onclick="mdChannel(' + i + ')">切換</button>' : '') + '</td>' +
       '<td class="hide-m" style="font-family:monospace">' + esc(u.referral_code || '—') + (u.referrals ? ' <span class="chip">' + u.referrals + '人</span>' : '') + '</td>' +
       '<td class="hide-m">' + esc(u.referred_by || '—') + '</td>' +
       '<td class="hide-m">' + esc(u.app_version || '—') + '</td>' +
@@ -416,8 +420,12 @@ async function loadUsers() {
         '<button class="sm sec" onclick="mdResetPw(' + i + ')">重設密碼</button>' +
         (ME.role === 'super' ? '<button class="sm sec" onclick="mdDevice(' + i + ')">改綁機</button>' : ''))) +
       '</td></tr>';
-  }).join('') || '<tr><td colspan="10" class="muted">沒有資料</td></tr>';
+  }).join('') || '<tr><td colspan="11" class="muted">沒有資料</td></tr>';
 }
+function chChip(ch) { return ch === 'beta' ? '<span class="chip" style="background:#fff1dc;color:#9a5b00">beta</span>' : '<span class="chip">stable</span>'; }
+function mdChannel(i) { const u = USERS[i]; const to = u.channel === 'beta' ? 'stable' : 'beta';
+  openModal('把「' + u.username + '」切到 ' + to, '<p class="muted" style="margin-bottom:10px">' + (to === 'beta' ? 'beta 會員會先拿到「發佈通道」裡指定給 beta 的版本，用來先測新版。' : '切回 stable 後會拿一般會員的版本（不會自動降版）。') + '</p>' + noteField,
+    async () => { await rpc('adm_set_channel', { p_user_id: u.id, p_channel: to, p_note: $('fNote').value }); toast('已切到 ' + to); loadUsers(); }); }
 function quickDays(i, d) { const u = USERS[i];
   openModal('幫「' + u.username + '」延長 ' + d + ' 天', noteField, async () => { await rpc('adm_add_days', { p_user_id: u.id, p_days: d, p_note: $('fNote').value }); toast('已延長 ' + d + ' 天'); loadUsers(); }); }
 function mdExpire(i) { const u = USERS[i];
@@ -498,7 +506,8 @@ function toggleDay(k) { const el = $('day' + k); el.style.display = el.style.dis
 
 // ---- audit ----
 const ACT = { set_expire: '改到期日', add_days: '續費', set_quota: '改發訊量', set_status: '改狀態', set_device: '改綁機', set_referrer: '改推薦人',
-              set_admin: '管理員異動', add_version: '登記版本', del_version: '刪除版本', add_download: '更新下載頁', set_setting: '改試用設定', reset_password: '重設會員密碼' };
+              set_admin: '管理員異動', add_version: '登記版本', del_version: '刪除版本', add_download: '更新下載頁', set_setting: '改試用設定', reset_password: '重設會員密碼',
+              set_channel: '改會員通道', set_release_channel: '改通道版本' };
 async function loadAudit() {
   let rows; try { rows = await rpc('adm_list_audit', { p_limit: 300, p_admin_email: ($('aFilter').value || null) }); } catch (e) { toast(e.message, true); return; }
   if (ME.role === 'super') { const sel = $('aFilter'); sel.style.display = '';
@@ -512,8 +521,8 @@ async function loadAudit() {
 }
 
 // ---- error reports ----
-const EKIND = { scan: '掃描', task: '發送', manual: '手動回報' };
-const ESTAGE = { login_failed: '登入失敗', exception: '程式例外', low_memory: '記憶體不足', error: '任務錯誤', user_note: '客戶描述' };
+const EKIND = { scan: '掃描', task: '發送', manual: '手動回報', crash: '程式異常' };
+const ESTAGE = { login_failed: '登入失敗', exception: '程式例外', low_memory: '記憶體不足', error: '任務錯誤', user_note: '客戶描述', unclean_exit: '上次未正常關閉', uncaught: '未攔截的例外' };
 async function loadErrors(all) {
   if (all) $('eQ').value = '';
   let rows; try { rows = await rpc('adm_list_error_reports', { p_limit: 300, p_q: $('eQ').value.trim() || null }); } catch (e) { toast(e.message, true); return; }
@@ -592,8 +601,28 @@ async function saveAdmin() {
 }
 
 // ---- versions ----
+let VERSIONS = [];
+async function loadChannels() {
+  let chs; try { chs = await rpc('adm_list_release_channels'); } catch (e) { $('chRows').textContent = e.message; return; }
+  const opts = cur => '<option value=""' + (!cur ? ' selected' : '') + '>（留空：最新登記的版本）</option>' +
+    VERSIONS.map(v => '<option value="' + esc(v.version) + '"' + (v.version === cur ? ' selected' : '') + '>v' + esc(v.version) + '</option>').join('');
+  $('chRows').innerHTML = (chs || []).map(c =>
+    '<div class="row" style="margin-bottom:8px;align-items:center">' +
+    '<b style="width:70px">' + (c.channel === 'beta' ? chChip('beta') : chChip('stable')) + '</b>' +
+    '<span class="muted" style="width:90px">目前 ' + (c.version ? 'v' + esc(c.version) : '（最新）') + '</span>' +
+    '<select id="ch_' + c.channel + '" style="min-width:220px">' + opts(c.version) + '</select>' +
+    (canDo('versions') ? '<button class="sm" onclick="setChannel(' + JSON.stringify(c.channel).replace(/"/g, '&quot;') + ')">指定</button>' : '') +
+    '<span class="muted">' + c.users + ' 位會員' + (c.updated_at ? '・' + esc(c.updated_at) + ' ' + esc(c.updated_by || '') : '') + '</span></div>'
+  ).join('') || '<span class="muted">（尚未建立通道，請先執行 channels_schema.sql）</span>';
+}
+async function setChannel(ch) {
+  const ver = $('ch_' + ch).value;
+  try { await rpc('adm_set_release_channel', { p_channel: ch, p_version: ver, p_note: '' }); toast(ch + ' 已指定 ' + (ver ? 'v' + ver : '最新版')); loadChannels(); }
+  catch (e) { toast(e.message.indexOf('version_not_found') >= 0 ? '這個版本還沒登記' : e.message, true); }
+}
 async function loadVersions() {
   let rows; try { rows = await rpc('adm_list_versions'); } catch (e) { toast(e.message, true); return; }
+  VERSIONS = rows || []; loadChannels();
   $('vRows').innerHTML = (rows || []).map(v =>
     '<tr><td><b>v' + esc(v.version) + '</b></td><td style="white-space:nowrap">' + esc(v.released_at) + '</td>' +
     '<td>' + (v.force_update ? '<span class="chip bad">強制</span>' : '') + '</td>' +
@@ -603,7 +632,7 @@ async function loadVersions() {
 }
 async function addVersion() {
   try { await rpc('adm_add_version', { p_version: $('vVer').value.trim(), p_download_url: $('vUrl').value.trim(), p_notes: $('vNotes').value.trim(), p_force: $('vForce').checked });
-    toast('版本已登記，客戶端將自動更新'); loadVersions(); } catch (e) { toast(e.message, true); }
+    toast('版本已登記；到上面「發佈通道」指定給 beta 或 stable，客戶端才會更新'); loadVersions(); } catch (e) { toast(e.message, true); }
 }
 async function delVersion(ver) {
   openModal('刪除版本 v' + ver + '？（客戶端將不再看到此版本）', '', async () => { await rpc('adm_del_version', { p_version: ver }); toast('已刪除'); loadVersions(); });
